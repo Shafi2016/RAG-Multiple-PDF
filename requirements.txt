@@ -3,3 +3,4 @@ langchain-openai
 langchain-community
 python-docx
 pypdf
+faiss-cpu
