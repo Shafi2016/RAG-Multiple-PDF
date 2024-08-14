@@ -19,7 +19,7 @@ st.sidebar.title("Session Settings")
 api_key = st.sidebar.text_input("Enter your OpenAI API Key", type="password")
 
 # 2. Model Selection
-model_name = st.sidebar.selectbox("Select Model", ["gpt-4o-mini", "gpt-3.5-turbo", "gpt-4o"])
+model_name = st.sidebar.selectbox("Select Model", ["gpt-4o-mini", "gpt-4o"])
 
 # 3. Upload PDF Files
 uploaded_files = st.sidebar.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
