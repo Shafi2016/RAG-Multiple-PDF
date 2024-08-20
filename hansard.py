@@ -31,7 +31,7 @@ query = st.text_input("Enter your query", value="What is the position of the Lib
 @st.cache_data(show_spinner=False)  # Cache the function to avoid re-running
 def process_documents(api_key, model_name, uploaded_files, query):
     # Initialize the embeddings and LLM
-    embeddings = OpenAIEmbeddings(openai_api_key=api_key)
+    embeddings = OpenAIEmbeddings(model='text-embedding-3-small', openai_api_key=api_key)
     llm = ChatOpenAI(temperature=0, model_name=model_name, max_tokens=4000, openai_api_key=api_key)
 
     # Initialize progress bars
