@@ -32,7 +32,7 @@ query = st.text_input("Enter your query", value="What is the position of the Lib
 def process_documents(api_key, model_name, uploaded_files, query):
     # Initialize the embeddings and LLM
     embeddings = OpenAIEmbeddings(openai_api_key=api_key)
-    llm = ChatOpenAI(temperature=0, model_name=model_name, max_tokens=6000, openai_api_key=api_key)
+    llm = ChatOpenAI(temperature=0, model_name=model_name, max_tokens=4000, openai_api_key=api_key)
 
     # Initialize progress bars
     loading_progress = st.progress(0)
@@ -59,15 +59,30 @@ def process_documents(api_key, model_name, uploaded_files, query):
     
     # Prepare the Chat Prompt Template
     prompt = ChatPromptTemplate.from_template("""
-    You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues. Answer the question by focusing on the relevant party based on the question. If the question asks about the Liberal Party, focus on the Liberal Party's viewpoint. If the question asks about the Conservative Party, focus on the Conservative Party's viewpoint. Provide detailed information including their proposals, policy stance, and any arguments made during the debate.
-
-    <context>
-    {context}
-    </context>
-
-    Question: {input}
-    1- Any significant points raised during the debate, including potential implications of each party's stance for each Question
-    2- Specific quotes or references from the debates that support your analysis for each Question   
+        You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues. 
+        Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion. 
+    
+        If the question asks about the Liberal Party, focus on the Liberal Party's viewpoint. If the question asks about the Conservative Party, focus on the Conservative Party's viewpoint. 
+    
+        Provide detailed information including their proposals, policy stance, and any arguments made during the debate.
+    
+        <context>
+        {context}
+        </context>
+    
+        Question: {input}
+    
+        **Main Points:**
+        1- Six main points summarizing the party's stance 
+    
+        **Supporting Quotes:**
+        2- List specific quotes that support the analysis, including the names of the individuals who made them or references from the debates
+    
+        **Potential Implications of Each Party's Stance:**
+        3 - Any significant points raised during the debate, including potential implications of each party's stance for each Question
+    
+        **Conclusion:**
+        4- Summarize the party's stance and its implications
     """)
 
     # Split the text into chunks
