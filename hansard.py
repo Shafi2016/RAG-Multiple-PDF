@@ -17,7 +17,7 @@ st.sidebar.title("Session Settings")
 
 # # 1. Input API Key
 # api_key = st.sidebar.text_input("Enter your OpenAI API Key", type="password")
-openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
+api_key = st.secrets["general"]["OPENAI_API_KEY"]
 # 2. Model Selection
 model_name = st.sidebar.selectbox("Select Model", ["gpt-4o-mini", "gpt-4o"])
 
