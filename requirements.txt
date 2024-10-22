@@ -1,7 +1,11 @@
 streamlit
-langchain-openai
+streamlit-authenticator==0.2.3
+langchain
 langchain-community
+langchain-openai
 python-docx
-pypdf
 faiss-cpu
-streamlit_authenticator
+openai
+PyPDF2
+pyyaml
+python-dotenv
