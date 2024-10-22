@@ -15,12 +15,18 @@ import yaml
 from yaml.loader import SafeLoader
 
 # Load credentials and configuration from Streamlit Secrets
-credentials = yaml.safe_load(st.secrets["general"]["credentials"])
-cookie_name = st.secrets["general"]["cookie_name"]
-cookie_key = st.secrets["general"]["cookie_key"]
-cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
+# credentials = yaml.safe_load(st.secrets["general"]["credentials"])
+# cookie_name = st.secrets["general"]["cookie_name"]
+# cookie_key = st.secrets["general"]["cookie_key"]
+# cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
 
-openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
+# openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
+
+cookie_name = st.secrets["cookie_name"]
+cookie_key = st.secrets["cookie_key"]
+cookie_expiry_days = st.secrets["cookie_expiry_days"]
+openai_api_key = st.secrets["OPENAI_API_KEY"]
+
 
 # Create an authenticator object with hashed passwords
 authenticator = stauth.Authenticate(
