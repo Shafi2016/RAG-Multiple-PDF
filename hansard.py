@@ -15,7 +15,7 @@ import yaml
 from yaml.loader import SafeLoader
 
 # Load credentials and configuration from Streamlit Secrets
-# credentials = yaml.safe_load(st.secrets["general"]["credentials"])
+credentials = yaml.safe_load(st.secrets["general"]["credentials"])
 # cookie_name = st.secrets["general"]["cookie_name"]
 # cookie_key = st.secrets["general"]["cookie_key"]
 # cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
