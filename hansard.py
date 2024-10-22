@@ -14,31 +14,53 @@ from io import BytesIO
 import yaml
 from yaml.loader import SafeLoader
 
+# Initialize session state for authentication
+if 'authentication_status' not in st.session_state:
+    st.session_state['authentication_status'] = None
+if 'name' not in st.session_state:
+    st.session_state['name'] = None
+if 'username' not in st.session_state:
+    st.session_state['username'] = None
+
 # Load credentials and configuration from Streamlit Secrets
-credentials = yaml.safe_load(st.secrets["general"]["credentials"])
-cookie_name = st.secrets["general"]["cookie_name"]
-cookie_key = st.secrets["general"]["cookie_key"]
-cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
+try:
+    credentials = st.secrets["general"]["credentials"]
+    cookie_name = st.secrets["general"]["cookie_name"]
+    cookie_key = st.secrets["general"]["cookie_key"]
+    cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
+    openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
+except Exception as e:
+    st.error("Please configure secrets in Streamlit Cloud. See README for instructions.")
+    st.stop()
 
-openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
-
-
-# Create an authenticator object with hashed passwords
-authenticator = stauth.Authenticate(
-    credentials,
-    cookie_name,
-    cookie_key,
-    cookie_expiry_days,
-    None  # No preauthorized emails in this example
-)
+# Create an authenticator object
+try:
+    authenticator = stauth.Authenticate(
+        credentials,
+        cookie_name,
+        cookie_key,
+        cookie_expiry_days,
+        None
+    )
+except Exception as e:
+    st.error(f"Authentication configuration error: {str(e)}")
+    st.stop()
 
 # Display the login form in the main area
-name, authentication_status, username = authenticator.login('main')
+try:
+    name, authentication_status, username = authenticator.login('Login', 'main')
+    st.session_state['authentication_status'] = authentication_status
+    st.session_state['name'] = name
+    st.session_state['username'] = username
+except Exception as e:
+    st.error(f"Login error: {str(e)}")
+    st.stop()
 
-if authentication_status:
+if st.session_state['authentication_status']:
     # Successful login
-    authenticator.logout('Logout', 'main')  # Added logout option
-    st.write(f'Welcome *{name}*')
+    authenticator.logout('Logout', 'main')
+    st.write(f'Welcome *{st.session_state["name"]}*')
+    
     # Main app functionality
     st.title("Hansard Insight Analyzer")
     st.sidebar.title("Session Settings")
@@ -53,61 +75,66 @@ if authentication_status:
 
     @st.cache_data(show_spinner=False)
     def process_documents(openai_api_key, model_name, uploaded_files, query):
-        embeddings = OpenAIEmbeddings(model='text-embedding-3-small', openai_api_key=openai_api_key)
-        llm = ChatOpenAI(temperature=0, model_name=model_name, max_tokens=4000, openai_api_key=openai_api_key)
+        try:
+            embeddings = OpenAIEmbeddings(model='text-embedding-3-small', openai_api_key=openai_api_key)
+            llm = ChatOpenAI(temperature=0, model_name=model_name, max_tokens=4000, openai_api_key=openai_api_key)
 
-        loading_progress = st.progress(0)
-        processing_progress = st.progress(0)
+            loading_progress = st.progress(0)
+            processing_progress = st.progress(0)
 
-        docs = []
-        total_files = len(uploaded_files)
-        for i, uploaded_file in enumerate(uploaded_files):
-            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-                tmp_file.write(uploaded_file.read())
-                tmp_file_path = tmp_file.name
+            docs = []
+            total_files = len(uploaded_files)
+            for i, uploaded_file in enumerate(uploaded_files):
+                with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                    tmp_file.write(uploaded_file.read())
+                    tmp_file_path = tmp_file.name
 
-            pdf_loader = PyPDFLoader(file_path=tmp_file_path)
-            docs += pdf_loader.load()
+                pdf_loader = PyPDFLoader(file_path=tmp_file_path)
+                docs += pdf_loader.load()
 
-            loading_progress.progress((i + 1) / total_files)
-            os.remove(tmp_file_path)
+                loading_progress.progress((i + 1) / total_files)
+                os.remove(tmp_file_path)
 
-        prompt = ChatPromptTemplate.from_template("""
-            You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
-            Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
-            {context}
-            Question: {input}
-        """)
+            prompt = ChatPromptTemplate.from_template("""
+                You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
+                Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
+                {context}
+                Question: {input}
+            """)
 
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
-        documents = text_splitter.split_documents(docs)
-        processing_progress.progress(33)
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
+            documents = text_splitter.split_documents(docs)
+            processing_progress.progress(33)
 
-        vector = FAISS.from_documents(documents, embeddings)
-        processing_progress.progress(66)
+            vector = FAISS.from_documents(documents, embeddings)
+            processing_progress.progress(66)
 
-        retriever = vector.as_retriever(search_kwargs={"k": 5})
-        document_chain = create_stuff_documents_chain(llm, prompt)
-        retrieval_chain = create_retrieval_chain(retriever, document_chain)
-        processing_progress.progress(100)
+            retriever = vector.as_retriever(search_kwargs={"k": 5})
+            document_chain = create_stuff_documents_chain(llm, prompt)
+            retrieval_chain = create_retrieval_chain(retriever, document_chain)
+            processing_progress.progress(100)
 
-        response = retrieval_chain.invoke({"input": query})
+            response = retrieval_chain.invoke({"input": query})
 
-        buffer = BytesIO()
-        doc = DocxDocument()
-        doc.add_paragraph(f"### Question: {query}\n\n**Answer:**\n")
-        doc.add_paragraph(response['answer'])
-        doc.save(buffer)
-        buffer.seek(0)
+            buffer = BytesIO()
+            doc = DocxDocument()
+            doc.add_paragraph(f"### Question: {query}\n\n**Answer:**\n")
+            doc.add_paragraph(response['answer'])
+            doc.save(buffer)
+            buffer.seek(0)
 
-        return response['answer'], buffer
+            return response['answer'], buffer
+        except Exception as e:
+            st.error(f"Error processing documents: {str(e)}")
+            return None, None
 
     if st.button("Apply"):
         if uploaded_files and openai_api_key and query:
             st.sidebar.success("Files uploaded successfully!")
             answer, buffer = process_documents(openai_api_key, model_name, uploaded_files, query)
-            st.markdown(f"### Question: {query}\n\n**Answer:** {answer}\n")
-            st.session_state['buffer'] = buffer
+            if answer and buffer:
+                st.markdown(f"### Question: {query}\n\n**Answer:** {answer}\n")
+                st.session_state['buffer'] = buffer
         else:
             st.sidebar.warning("Please upload PDFs and enter your query.")
 
@@ -118,7 +145,8 @@ if authentication_status:
             file_name="response.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-elif authentication_status == False:
+
+elif st.session_state['authentication_status'] == False:
     st.error('Username/password is incorrect')
-elif authentication_status is None:
+else:
     st.warning('Please enter your username and password')
