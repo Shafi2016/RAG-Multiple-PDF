@@ -15,22 +15,32 @@ import yaml
 from yaml.loader import SafeLoader
 
 # Page config
-st.set_page_config(page_title="Hansard Insight Analyzer", layout="wide")
+st.set_page_config(
+    page_title="Hansard Insight Analyzer",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Initialize session states
+# Initialize session state
 if 'authentication_status' not in st.session_state:
     st.session_state['authentication_status'] = None
 if 'name' not in st.session_state:
     st.session_state['name'] = None
 if 'username' not in st.session_state:
     st.session_state['username'] = None
+if 'logout' not in st.session_state:
+    st.session_state['logout'] = False
 
-# Load credentials and configuration from Streamlit Secrets
-credentials = yaml.safe_load(st.secrets["general"]["credentials"])
-cookie_name = st.secrets["general"]["cookie_name"]
-cookie_key = st.secrets["general"]["cookie_key"]
-cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
-openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
+# Load credentials and configuration
+try:
+    credentials = yaml.safe_load(st.secrets["general"]["credentials"])
+    cookie_name = st.secrets["general"]["cookie_name"]
+    cookie_key = st.secrets["general"]["cookie_key"]
+    cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
+    openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
+except Exception as e:
+    st.error("Error loading credentials. Please check your secrets configuration.")
+    st.stop()
 
 # Create the authenticator object
 authenticator = stauth.Authenticate(
@@ -40,46 +50,80 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days
 )
 
-# Handle authentication
+# Sidebar header
+st.sidebar.title("Hansard Analyzer")
+
+# Logout button in sidebar if user is authenticated
+if st.session_state.authentication_status:
+    with st.sidebar:
+        st.write(f"Logged in as: *{st.session_state.name}*")
+        if st.button("Logout", key="logout_button"):
+            st.session_state.authentication_status = None
+            st.session_state.name = None
+            st.session_state.username = None
+            st.session_state.logout = True
+            st.rerun()
+
+# Main authentication logic
 if not st.session_state.authentication_status:
+    st.title("Welcome to Hansard Insight Analyzer")
+    st.markdown("Please login to continue.")
+    
+    # Login form
     name, authentication_status, username = authenticator.login()
     
     if authentication_status == False:
-        st.error('Username/password is incorrect')
-    elif authentication_status == None:
-        st.warning('Please enter your username and password')
+        st.error('Invalid username or password')
     
-    st.session_state['authentication_status'] = authentication_status
-    st.session_state['name'] = name
-    st.session_state['username'] = username
-
-if st.session_state.authentication_status:
-    # Sidebar with logout
-    st.sidebar.title("Session Settings")
-    if authenticator.logout('Logout', 'sidebar'):
-        st.session_state['authentication_status'] = None
-        st.session_state['name'] = None
-        st.session_state['username'] = None
+    # Update session state
+    if authentication_status:
+        st.session_state.authentication_status = authentication_status
+        st.session_state.name = name
+        st.session_state.username = username
         st.rerun()
-        
-    # Main application
-    st.write(f'Welcome *{st.session_state["name"]}*')
+
+# Main application
+if st.session_state.authentication_status:
     st.title("Hansard Insight Analyzer")
     
+    # Sidebar settings
+    st.sidebar.title("Analysis Settings")
+    
     # Model selection
-    model_name = st.sidebar.selectbox("Select Model", ["gpt-4o-mini", "gpt-4o"])
+    model_name = st.sidebar.selectbox(
+        "Select Model",
+        ["gpt-4o-mini", "gpt-4o"],
+        help="Choose the OpenAI model to use for analysis"
+    )
     
     # File upload
-    uploaded_files = st.sidebar.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
+    uploaded_files = st.sidebar.file_uploader(
+        "Upload PDF files",
+        type="pdf",
+        accept_multiple_files=True,
+        help="Upload one or more PDF files for analysis"
+    )
     
     # Query input
-    query = st.text_input("Enter your query", value="What is the position of the Liberal Party on Carbon Pricing?")
+    query = st.text_input(
+        "Enter your query",
+        value="What is the position of the Liberal Party on Carbon Pricing?",
+        help="Enter your question about the uploaded documents"
+    )
 
     @st.cache_data(show_spinner=False)
     def process_documents(openai_api_key, model_name, uploaded_files, query):
         try:
-            embeddings = OpenAIEmbeddings(model='text-embedding-3-small', openai_api_key=openai_api_key)
-            llm = ChatOpenAI(temperature=0, model_name=model_name, max_tokens=4000, openai_api_key=openai_api_key)
+            embeddings = OpenAIEmbeddings(
+                model='text-embedding-3-small',
+                openai_api_key=openai_api_key
+            )
+            llm = ChatOpenAI(
+                temperature=0,
+                model_name=model_name,
+                max_tokens=4000,
+                openai_api_key=openai_api_key
+            )
 
             loading_progress = st.progress(0)
             processing_progress = st.progress(0)
@@ -96,7 +140,10 @@ if st.session_state.authentication_status:
                 loading_progress.progress((i + 1) / total_files)
                 os.remove(tmp_file_path)
 
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1500,
+                chunk_overlap=300
+            )
             documents = text_splitter.split_documents(docs)
             processing_progress.progress(33)
 
@@ -135,24 +182,33 @@ if st.session_state.authentication_status:
             buffer.seek(0)
 
             return response, buffer
+            
         except Exception as e:
             st.error(f"Error processing documents: {str(e)}")
             return None, None
 
-    if st.button("Apply"):
+    # Analysis button
+    if st.button("Analyze Documents", key="analyze_button"):
         if uploaded_files and openai_api_key and query:
-            st.sidebar.success("Files uploaded successfully!")
-            answer, buffer = process_documents(openai_api_key, model_name, uploaded_files, query)
-            if answer and buffer:
-                st.markdown(f"### Question: {query}\n\n**Answer:** {answer}\n")
-                st.session_state['buffer'] = buffer
+            with st.spinner('Processing documents...'):
+                answer, buffer = process_documents(openai_api_key, model_name, uploaded_files, query)
+                if answer and buffer:
+                    st.success("Analysis complete!")
+                    st.markdown(f"### Analysis Results\n\n**Question:** {query}\n\n**Answer:** {answer}\n")
+                    st.session_state['buffer'] = buffer
         else:
-            st.sidebar.warning("Please upload PDFs and enter your query.")
+            st.warning("Please upload PDF files and enter a query to analyze.")
 
+    # Download button
     if 'buffer' in st.session_state:
         st.download_button(
-            label="Download .docx",
+            label="Download Analysis (DOCX)",
             data=st.session_state['buffer'],
-            file_name="response.docx",
+            file_name="hansard_analysis.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+
+# Clear session state on logout
+if st.session_state.logout:
+    st.session_state.clear()
+    st.rerun()
