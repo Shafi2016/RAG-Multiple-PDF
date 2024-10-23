@@ -14,6 +14,27 @@ from io import BytesIO
 import yaml
 from yaml.loader import SafeLoader
 
+def check_password():
+    """Returns `True` if the user had a correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if authenticator.logout('Logout', 'main', key='unique_key'):
+            st.session_state['name'] = None
+            st.session_state['username'] = None
+            st.session_state['authentication_status'] = None
+            st.session_state['logout'] = True
+            st.rerun()
+
+    if st.session_state["authentication_status"]:
+        password_entered()
+        return True
+    elif st.session_state["authentication_status"] == False:
+        st.error('Username/password is incorrect')
+        return False
+    elif st.session_state["authentication_status"] is None:
+        return False
+
 # Page config
 st.set_page_config(page_title="Hansard Analyzer", layout="wide")
 
@@ -24,6 +45,8 @@ if 'name' not in st.session_state:
     st.session_state['name'] = None
 if 'username' not in st.session_state:
     st.session_state['username'] = None
+if 'logout' not in st.session_state:
+    st.session_state['logout'] = False
 
 # Load credentials and configuration
 try:
@@ -44,30 +67,22 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days
 )
 
-# Authentication handling
-if not st.session_state.authentication_status:
+# Handle Authentication
+if not st.session_state['authentication_status']:
     st.title("Hansard Analyzer")
     name, authentication_status, username = authenticator.login()
+    st.session_state['name'] = name
+    st.session_state['authentication_status'] = authentication_status
+    st.session_state['username'] = username
     if authentication_status == False:
         st.error("Username/password is incorrect")
     elif authentication_status == None:
         st.warning("Please enter your username and password")
-    
-    st.session_state['authentication_status'] = authentication_status
-    st.session_state['name'] = name
-    st.session_state['username'] = username
 
-if st.session_state.authentication_status:
+if check_password():
     # Sidebar setup
     st.sidebar.title("Hansard Analyzer")
-    st.sidebar.write(f"Logged in as: {st.session_state.name}")
-    
-    # Logout button
-    if st.sidebar.button("Logout"):
-        st.session_state['authentication_status'] = None
-        st.session_state['name'] = None
-        st.session_state['username'] = None
-        st.rerun()
+    st.sidebar.write(f"Logged in as: {st.session_state['name']}")
     
     st.sidebar.title("Analysis Settings")
     
@@ -197,3 +212,7 @@ if st.session_state.authentication_status:
             file_name="hansard_analysis.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+
+if st.session_state.get('logout', False):
+    st.session_state.clear()
+    st.rerun()
