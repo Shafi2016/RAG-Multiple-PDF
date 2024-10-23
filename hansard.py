@@ -41,12 +41,103 @@ def load_config():
         st.error(f"Error loading configuration: {str(e)}")
         st.stop()
 
-# Your process_documents function remains the same
 @st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
     """Process documents and generate analysis"""
-    # Implementation remains the same
-    pass
+    try:
+        # Initialize progress bars
+        loading_progress = st.progress(0)
+        processing_progress = st.progress(0)
+
+        # Initialize language models
+        embeddings = OpenAIEmbeddings(
+            model='text-embedding-3-small',
+            openai_api_key=openai_api_key
+        )
+        llm = ChatOpenAI(
+            temperature=0,
+            model_name=model_name,
+            openai_api_key=openai_api_key
+        )
+
+        # Process documents
+        docs = []
+        total_files = len(uploaded_files)
+        
+        for i, uploaded_file in enumerate(uploaded_files):
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_file_path = tmp_file.name
+
+            # Load PDF
+            loader = PyPDFLoader(file_path=tmp_file_path)
+            docs.extend(loader.load())
+            
+            # Clean up temporary file
+            os.remove(tmp_file_path)
+            
+            # Update progress
+            loading_progress.progress((i + 1) / total_files)
+
+        # Split documents
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500,
+            chunk_overlap=300
+        )
+        splits = text_splitter.split_documents(docs)
+        processing_progress.progress(0.4)
+
+        # Create vector store
+        vectorstore = FAISS.from_documents(splits, embeddings)
+        retriever = vectorstore.as_retriever(
+            search_kwargs={"k": 5}
+        )
+        processing_progress.progress(0.6)
+
+        # Create prompt template
+        prompt = ChatPromptTemplate.from_template("""
+        You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
+        Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
+        
+        Context: {context}
+        Question: {question}
+        
+        Answer:""")
+
+        # Create chain
+        chain = (
+            RunnableParallel(
+                {"context": retriever, "question": RunnablePassthrough()}
+            )
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        
+        processing_progress.progress(0.8)
+
+        # Generate response
+        response = chain.invoke(query)
+        processing_progress.progress(1.0)
+
+        # Create document
+        buffer = BytesIO()
+        doc = DocxDocument()
+        doc.add_paragraph(f"Question: {query}\n\nAnswer:\n")
+        doc.add_paragraph(response)
+        doc.save(buffer)
+        buffer.seek(0)
+
+        # Clear progress bars
+        loading_progress.empty()
+        processing_progress.empty()
+
+        return response, buffer
+
+    except Exception as e:
+        st.error(f"Error processing documents: {str(e)}")
+        return None, None
 
 def main():
     config = load_config()
@@ -105,7 +196,7 @@ def main():
         # Model selection
         model_name = st.sidebar.selectbox(
             "Select Model",
-            ["gpt-4o-mini", "gpt-4o"]
+            ["gpt-3.5-turbo", "gpt-4"]  # Updated model names to match OpenAI's offerings
         )
         
         # File upload
@@ -142,7 +233,7 @@ def main():
                 st.warning("Please upload PDF files and enter a query.")
 
         # Download button
-        if 'buffer' in st.session_state:
+        if 'buffer' in st.session_state and st.session_state['buffer'] is not None:
             st.download_button(
                 label="Download Analysis",
                 data=st.session_state['buffer'],
