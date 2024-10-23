@@ -19,15 +19,12 @@ st.set_page_config(page_title="Hansard Analyzer", layout="wide")
 
 def init_session_state():
     """Initialize session state variables"""
-    session_vars = {
-        'authentication_status': None,
-        'name': None,
-        'username': None,
-        'init_done': False
-    }
-    for var, value in session_vars.items():
-        if var not in st.session_state:
-            st.session_state[var] = value
+    if 'authentication_status' not in st.session_state:
+        st.session_state['authentication_status'] = None
+    if 'name' not in st.session_state:
+        st.session_state['name'] = None
+    if 'username' not in st.session_state:
+        st.session_state['username'] = None
 
 def load_config():
     """Load configuration from secrets"""
@@ -109,10 +106,8 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
 
         processing_progress.progress(100)
         
-        # Generate response
         response = chain.invoke(query)
 
-        # Create document
         buffer = BytesIO()
         doc = DocxDocument()
         doc.add_paragraph(f"Question: {query}\n\nAnswer:\n")
@@ -126,25 +121,8 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         st.error(f"Error processing documents: {str(e)}")
         return None, None
 
-def perform_logout():
-    """Perform logout and clear all session state"""
-    # Clear all session state
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    
-    # Reinitialize essential states
-    st.session_state.authentication_status = None
-    st.session_state.name = None
-    st.session_state.username = None
-    
-    # Force a rerun to clear the page
-    st.rerun()
-
 def main():
-    # Initialize session state
     init_session_state()
-    
-    # Load configuration
     config = load_config()
     
     # Create authenticator
@@ -155,53 +133,51 @@ def main():
         config['cookie_expiry_days']
     )
 
-    # Show title only if not authenticated
-    if not st.session_state.authentication_status:
-        st.title("Hansard Analyzer")
+    st.title("Hansard Analyzer")
 
     # Handle Authentication
-    if not st.session_state.authentication_status:
+    if not st.session_state['authentication_status']:
         try:
             authentication_status, name, username = authenticator.login()
+            st.session_state['authentication_status'] = authentication_status
+            st.session_state['name'] = name
+            st.session_state['username'] = username
             
-            if authentication_status:
-                st.session_state.authentication_status = authentication_status
-                st.session_state.name = name
-                st.session_state.username = username
-                st.rerun()  # Rerun to update the UI with authenticated state
-            elif authentication_status is False:
+            if authentication_status is False:
                 st.error("Username/password is incorrect")
-            else:
+            elif authentication_status is None:
                 st.warning("Please enter your username and password")
         except Exception as e:
             st.error(f"Authentication error: {str(e)}")
-            st.stop()
     
     # Main application
-    if st.session_state.authentication_status:
+    if st.session_state['authentication_status']:
         # Sidebar setup
-        with st.sidebar:
-            st.title("Hansard Analyzer")
-            st.write(f"Logged in as: {st.session_state.name}")
-            
-            # Logout button in sidebar
-            if st.button("Logout", key="logout_button"):
-                perform_logout()
-            
-            st.title("Analysis Settings")
-            
-            # Model selection
-            model_name = st.selectbox(
-                "Select Model",
-                ["gpt-4o-mini", "gpt-4o"]
-            )
-            
-            # File upload
-            uploaded_files = st.file_uploader(
-                "Upload PDF files",
-                type="pdf",
-                accept_multiple_files=True
-            )
+        st.sidebar.title("Hansard Analyzer")
+        st.sidebar.write(f"Logged in as: {st.session_state['name']}")
+        
+        # Logout button with direct rerun
+        if st.sidebar.button("Logout"):
+            st.session_state['authentication_status'] = None
+            st.session_state['name'] = None
+            st.session_state['username'] = None
+            st.session_state['buffer'] = None
+            st.rerun()
+        
+        st.sidebar.title("Analysis Settings")
+        
+        # Model selection
+        model_name = st.sidebar.selectbox(
+            "Select Model",
+            ["gpt-4o-mini", "gpt-4o"]
+        )
+        
+        # File upload
+        uploaded_files = st.sidebar.file_uploader(
+            "Upload PDF files",
+            type="pdf",
+            accept_multiple_files=True
+        )
         
         # Main content
         st.title("Hansard Insight Analyzer")
@@ -230,7 +206,7 @@ def main():
                 st.warning("Please upload PDF files and enter a query.")
 
         # Download button
-        if 'buffer' in st.session_state:
+        if 'buffer' in st.session_state and st.session_state['buffer'] is not None:
             st.download_button(
                 label="Download Analysis",
                 data=st.session_state['buffer'],
