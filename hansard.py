@@ -18,16 +18,8 @@ from yaml.loader import SafeLoader
 st.set_page_config(page_title="Hansard Analyzer", layout="wide")
 
 # Initialize session state
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'name' not in st.session_state:
-    st.session_state.name = None
-if 'username' not in st.session_state:
-    st.session_state.username = None
-if 'analysis_result' not in st.session_state:
-    st.session_state.analysis_result = None
-if 'current_query' not in st.session_state:
-    st.session_state.current_query = None
+if 'authentication_status' not in st.session_state:
+    st.session_state.authentication_status = None
 
 def load_config():
     """Load configuration from secrets"""
@@ -42,11 +34,6 @@ def load_config():
     except Exception as e:
         st.error(f"Error loading configuration: {str(e)}")
         st.stop()
-
-def clear_session_state():
-    """Clear all session state variables"""
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
 
 @st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
@@ -68,33 +55,27 @@ def main():
     st.title("Hansard Analyzer")
 
     # Handle Authentication
-    if not st.session_state.get('logged_in', False):
-        try:
-            authentication_status, name, username = authenticator.login()
-            
-            if authentication_status:
-                st.session_state.logged_in = True
-                st.session_state.name = name
-                st.session_state.username = username
-                st.rerun()
-            elif authentication_status is False:
-                st.error("Username/password is incorrect")
-            else:
-                st.warning("Please enter your username and password")
-        except Exception as e:
-            st.error(f"Authentication error: {str(e)}")
-        return
+    if not st.session_state["authentication_status"]:
+        name, authentication_status, username = authenticator.login('Login', 'main')
+        if authentication_status == False:
+            st.error('Username/password is incorrect')
+        elif authentication_status == None:
+            st.warning('Please enter your username and password')
+        
+        if authentication_status:
+            st.session_state["authentication_status"] = True
+            st.session_state["name"] = name
+            st.session_state["username"] = username
+            st.rerun()
 
-    # Main application (only runs if logged in)
-    if st.session_state.logged_in:
+    # Main application
+    if st.session_state["authentication_status"]:
         # Sidebar for settings and logout
         with st.sidebar:
-            st.write(f"Welcome *{st.session_state.name}*")
+            st.write(f"Welcome *{st.session_state['name']}*")
             
             # Logout button
-            if st.button('Logout'):
-                clear_session_state()
-                st.rerun()
+            authenticator.logout('Logout', 'sidebar')
             
             st.markdown("### Settings")
             
@@ -127,25 +108,18 @@ def main():
                         query
                     )
                     if answer and buffer:
-                        st.session_state.analysis_result = answer
-                        st.session_state.current_query = query
-                        st.session_state.buffer = buffer
-                        st.success("Analysis complete!")
+                        st.markdown(f"**Question: {query}**")
+                        st.markdown(f"**Answer:** {answer}")
+                        
+                        # Download button
+                        st.download_button(
+                            label="Download Analysis",
+                            data=buffer,
+                            file_name="hansard_analysis.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
             else:
                 st.warning("Please upload PDF files and enter a query.")
-        
-        # Display results
-        if st.session_state.get('analysis_result'):
-            st.markdown(f"**Question: {st.session_state.current_query}**")
-            st.markdown(f"**Answer:** {st.session_state.analysis_result}")
-            
-            # Download button
-            st.download_button(
-                label="Download Analysis",
-                data=st.session_state.buffer,
-                file_name="hansard_analysis.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
 
 if __name__ == "__main__":
     main()
