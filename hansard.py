@@ -40,22 +40,8 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days
 )
 
-# Sidebar layout
-with st.sidebar:
-    if st.session_state.authentication_status:
-        st.title("Session Settings")
-        col1, col2 = st.columns([1,1])
-        with col2:
-            if authenticator.logout('Logout', 'sidebar'):
-                st.session_state['authentication_status'] = None
-                st.session_state['name'] = None
-                st.session_state['username'] = None
-                st.rerun()
-
-# Main content
+# Handle authentication
 if not st.session_state.authentication_status:
-    # Show login form
-    st.title("Hansard Insight Analyzer - Login")
     name, authentication_status, username = authenticator.login()
     
     if authentication_status == False:
@@ -63,16 +49,20 @@ if not st.session_state.authentication_status:
     elif authentication_status == None:
         st.warning('Please enter your username and password')
     
-    # Update session state
     st.session_state['authentication_status'] = authentication_status
     st.session_state['name'] = name
     st.session_state['username'] = username
-    
-    if authentication_status:
-        st.rerun()
 
-elif st.session_state.authentication_status:
-    # Show main application
+if st.session_state.authentication_status:
+    # Sidebar with logout
+    st.sidebar.title("Session Settings")
+    if authenticator.logout('Logout', 'sidebar'):
+        st.session_state['authentication_status'] = None
+        st.session_state['name'] = None
+        st.session_state['username'] = None
+        st.rerun()
+        
+    # Main application
     st.write(f'Welcome *{st.session_state["name"]}*')
     st.title("Hansard Insight Analyzer")
     
@@ -97,4 +87,72 @@ elif st.session_state.authentication_status:
             docs = []
             total_files = len(uploaded_files)
             for i, uploaded_file in enumerate(uploaded_files):
-                with
+                with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                    tmp_file.write(uploaded_file.read())
+                    tmp_file_path = tmp_file.name
+
+                pdf_loader = PyPDFLoader(file_path=tmp_file_path)
+                docs += pdf_loader.load()
+                loading_progress.progress((i + 1) / total_files)
+                os.remove(tmp_file_path)
+
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
+            documents = text_splitter.split_documents(docs)
+            processing_progress.progress(33)
+
+            vectorstore = FAISS.from_documents(documents, embeddings)
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+            processing_progress.progress(66)
+
+            template = """You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
+            Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
+            
+            Context: {context}
+            Question: {question}
+            
+            Answer:"""
+
+            prompt = ChatPromptTemplate.from_template(template)
+
+            chain = (
+                RunnableParallel(
+                    {"context": retriever, "question": RunnablePassthrough()}
+                )
+                | prompt
+                | llm
+                | StrOutputParser()
+            )
+
+            processing_progress.progress(100)
+            
+            response = chain.invoke(query)
+
+            buffer = BytesIO()
+            doc = DocxDocument()
+            doc.add_paragraph(f"### Question: {query}\n\n**Answer:**\n")
+            doc.add_paragraph(response)
+            doc.save(buffer)
+            buffer.seek(0)
+
+            return response, buffer
+        except Exception as e:
+            st.error(f"Error processing documents: {str(e)}")
+            return None, None
+
+    if st.button("Apply"):
+        if uploaded_files and openai_api_key and query:
+            st.sidebar.success("Files uploaded successfully!")
+            answer, buffer = process_documents(openai_api_key, model_name, uploaded_files, query)
+            if answer and buffer:
+                st.markdown(f"### Question: {query}\n\n**Answer:** {answer}\n")
+                st.session_state['buffer'] = buffer
+        else:
+            st.sidebar.warning("Please upload PDFs and enter your query.")
+
+    if 'buffer' in st.session_state:
+        st.download_button(
+            label="Download .docx",
+            data=st.session_state['buffer'],
+            file_name="response.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
