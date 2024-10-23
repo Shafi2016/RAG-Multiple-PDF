@@ -45,9 +45,86 @@ def load_config():
 
 @st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
-    # [Previous implementation remains the same]
-    # Removed for brevity - no changes needed here
-    pass
+    """Process documents and generate analysis"""
+    try:
+        embeddings = OpenAIEmbeddings(
+            model='text-embedding-3-small',
+            openai_api_key=openai_api_key
+        )
+        llm = ChatOpenAI(
+            temperature=0,
+            model_name=model_name,
+            max_tokens=4000,
+            openai_api_key=openai_api_key
+        )
+
+        # Progress bars
+        loading_progress = st.progress(0)
+        processing_progress = st.progress(0)
+
+        # Process documents
+        docs = []
+        total_files = len(uploaded_files)
+        for i, uploaded_file in enumerate(uploaded_files):
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_file_path = tmp_file.name
+
+            pdf_loader = PyPDFLoader(file_path=tmp_file_path)
+            docs.extend(pdf_loader.load())
+            loading_progress.progress((i + 1) / total_files)
+            os.remove(tmp_file_path)
+
+        # Split documents
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500,
+            chunk_overlap=300
+        )
+        documents = text_splitter.split_documents(docs)
+        processing_progress.progress(33)
+
+        # Create vector store
+        vectorstore = FAISS.from_documents(documents, embeddings)
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+        processing_progress.progress(66)
+
+        template = """You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
+        Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
+        
+        Context: {context}
+        Question: {question}
+        
+        Answer:"""
+
+        prompt = ChatPromptTemplate.from_template(template)
+
+        chain = (
+            RunnableParallel(
+                {"context": retriever, "question": RunnablePassthrough()}
+            )
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+
+        processing_progress.progress(100)
+        
+        # Generate response
+        response = chain.invoke(query)
+
+        # Create document
+        buffer = BytesIO()
+        doc = DocxDocument()
+        doc.add_paragraph(f"Question: {query}\n\nAnswer:\n")
+        doc.add_paragraph(response)
+        doc.save(buffer)
+        buffer.seek(0)
+
+        return response, buffer
+        
+    except Exception as e:
+        st.error(f"Error processing documents: {str(e)}")
+        return None, None
 
 def perform_logout():
     """Perform logout and clear all session state"""
