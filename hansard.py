@@ -38,8 +38,94 @@ def load_config():
 @st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
     """Process documents and generate analysis"""
-    # [Previous implementation remains the same]
-    pass
+    try:
+        # Initialize progress indicators
+        progress_text = st.empty()
+        progress_text.text("Loading documents...")
+        loading_progress = st.progress(0)
+        processing_progress = st.progress(0)
+
+        # Initialize language models
+        embeddings = OpenAIEmbeddings(
+            model='text-embedding-3-small',
+            openai_api_key=openai_api_key
+        )
+        llm = ChatOpenAI(
+            temperature=0,
+            model_name=model_name,
+            max_tokens=4000,
+            openai_api_key=openai_api_key
+        )
+
+        # Process documents
+        docs = []
+        total_files = len(uploaded_files)
+        
+        for i, uploaded_file in enumerate(uploaded_files):
+            progress_text.text(f"Processing file {i+1} of {total_files}...")
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_file_path = tmp_file.name
+
+            loader = PyPDFLoader(file_path=tmp_file_path)
+            docs.extend(loader.load())
+            
+            os.remove(tmp_file_path)
+            loading_progress.progress((i + 1) / total_files)
+
+        progress_text.text("Splitting documents...")
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500,
+            chunk_overlap=300
+        )
+        splits = text_splitter.split_documents(docs)
+        processing_progress.progress(0.4)
+
+        progress_text.text("Creating vector store...")
+        vectorstore = FAISS.from_documents(splits, embeddings)
+        retriever = vectorstore.as_retriever(
+            search_kwargs={"k": 5}
+        )
+        processing_progress.progress(0.6)
+
+        prompt = ChatPromptTemplate.from_template("""
+            You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
+            Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
+            {context}
+            Question: {input}
+        """)
+
+        chain = (
+            RunnableParallel(
+                {"context": retriever, "input": RunnablePassthrough()}
+            )
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        
+        processing_progress.progress(0.8)
+        response = chain.invoke(query)
+        processing_progress.progress(1.0)
+
+        # Create document
+        buffer = BytesIO()
+        doc = DocxDocument()
+        doc.add_paragraph(f"Question: {query}\n\nAnswer:\n")
+        doc.add_paragraph(response)
+        doc.save(buffer)
+        buffer.seek(0)
+
+        # Clear progress indicators
+        progress_text.empty()
+        loading_progress.empty()
+        processing_progress.empty()
+
+        return response, buffer
+
+    except Exception as e:
+        st.error(f"Error processing documents: {str(e)}")
+        return None, None
 
 def main():
     config = load_config()
@@ -56,7 +142,9 @@ def main():
 
     # Handle Authentication
     if not st.session_state["authentication_status"]:
-        name, authentication_status, username = authenticator.login('Login', 'main')
+        # Updated login method call without deprecated parameters
+        authentication_status, name, username = authenticator.login()
+        
         if authentication_status == False:
             st.error('Username/password is incorrect')
         elif authentication_status == None:
@@ -74,8 +162,11 @@ def main():
         with st.sidebar:
             st.write(f"Welcome *{st.session_state['name']}*")
             
-            # Logout button
-            authenticator.logout('Logout', 'sidebar')
+            if st.button("Logout", key='unique_logout'):
+                st.session_state["authentication_status"] = None
+                st.session_state["name"] = None
+                st.session_state["username"] = None
+                st.rerun()
             
             st.markdown("### Settings")
             
@@ -111,7 +202,6 @@ def main():
                         st.markdown(f"**Question: {query}**")
                         st.markdown(f"**Answer:** {answer}")
                         
-                        # Download button
                         st.download_button(
                             label="Download Analysis",
                             data=buffer,
