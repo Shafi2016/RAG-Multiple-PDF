@@ -17,18 +17,16 @@ from yaml.loader import SafeLoader
 # Page config
 st.set_page_config(page_title="Hansard Analyzer", layout="wide")
 
-def init_session_state():
-    # Initialize authentication state
-    if 'authentication_status' not in st.session_state:
-        st.session_state.authentication_status = None
-    if 'name' not in st.session_state:
-        st.session_state.name = None
-    if 'username' not in st.session_state:
-        st.session_state.username = None
-    if 'stored_data' not in st.session_state:
-        st.session_state.stored_data = None
+# Initialize session state
+if 'authentication_status' not in st.session_state:
+    st.session_state['authentication_status'] = None
+if 'name' not in st.session_state:
+    st.session_state['name'] = None
+if 'username' not in st.session_state:
+    st.session_state['username'] = None
 
 def load_config():
+    """Load configuration from secrets"""
     try:
         return {
             'credentials': yaml.safe_load(st.secrets["general"]["credentials"]),
@@ -39,9 +37,11 @@ def load_config():
         }
     except Exception as e:
         st.error(f"Error loading configuration: {str(e)}")
-        return None
+        st.stop()
 
+@st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
+    """Process documents and generate analysis"""
     try:
         # Initialize progress indicators
         progress_text = st.empty()
@@ -57,6 +57,7 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         llm = ChatOpenAI(
             temperature=0,
             model_name=model_name,
+            max_tokens=4000,
             openai_api_key=openai_api_key
         )
 
@@ -76,10 +77,6 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
             os.remove(tmp_file_path)
             loading_progress.progress((i + 1) / total_files)
 
-        if not docs:
-            st.error("No documents were processed successfully.")
-            return None, None
-
         progress_text.text("Splitting documents...")
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1500,
@@ -87,10 +84,6 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         )
         splits = text_splitter.split_documents(docs)
         processing_progress.progress(0.4)
-
-        if not splits:
-            st.error("Document splitting failed.")
-            return None, None
 
         progress_text.text("Creating vector store...")
         vectorstore = FAISS.from_documents(splits, embeddings)
@@ -120,10 +113,6 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         response = chain.invoke(query)
         processing_progress.progress(1.0)
 
-        if not response:
-            st.error("No response generated from the analysis.")
-            return None, None
-
         # Create document
         buffer = BytesIO()
         doc = DocxDocument()
@@ -144,13 +133,9 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         return None, None
 
 def main():
-    init_session_state()
     config = load_config()
     
-    if not config:
-        st.error("Failed to load configuration")
-        return
-
+    # Create authenticator
     authenticator = stauth.Authenticate(
         config['credentials'],
         config['cookie_name'],
@@ -158,34 +143,38 @@ def main():
         config['cookie_expiry_days']
     )
 
-    if not st.session_state.authentication_status:
-        st.title("Hansard Analyzer")
+    st.title("Hansard Analyzer")
+
+    # Handle Authentication
+    if not st.session_state['authentication_status']:
         authentication_status, name, username = authenticator.login()
-        st.session_state.authentication_status = authentication_status
-        st.session_state.name = name
-        st.session_state.username = username
         
-        if authentication_status is False:
+        if authentication_status:
+            st.session_state['authentication_status'] = authentication_status
+            st.session_state['name'] = name
+            st.session_state['username'] = username
+            st.rerun()
+        elif authentication_status is False:
             st.error("Username/password is incorrect")
-            return
         elif authentication_status is None:
             st.warning("Please enter your username and password")
-            return
-    
-    if st.session_state.authentication_status:
+        return
+
+    # Main application
+    if st.session_state['authentication_status']:
         # Sidebar
         with st.sidebar:
-            st.write(f"Welcome *{st.session_state.name}*")
+            st.write(f"Welcome *{st.session_state['name']}*")
             
             # Logout button
-            if st.button('Logout'):
-                # Clear session state
+            if st.button("Logout", key='logout_button'):
+                # Clear all session states
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
-                st.session_state.authentication_status = None
-                st.experimental_rerun()
+                st.rerun()
             
             st.markdown("### Settings")
+            
             model_name = st.selectbox(
                 "Select Model",
                 ["gpt-4o-mini", "gpt-4o"]
@@ -208,27 +197,22 @@ def main():
         if st.button("Apply", type="primary"):
             if uploaded_files and query:
                 with st.spinner("Analyzing documents..."):
-                    try:
-                        answer, buffer = process_documents(
-                            config['openai_api_key'],
-                            model_name,
-                            uploaded_files,
-                            query
+                    answer, buffer = process_documents(
+                        config['openai_api_key'],
+                        model_name,
+                        uploaded_files,
+                        query
+                    )
+                    if answer and buffer:
+                        st.markdown(f"**Question: {query}**")
+                        st.markdown(f"**Answer:** {answer}")
+                        
+                        st.download_button(
+                            label="Download Analysis",
+                            data=buffer,
+                            file_name="hansard_analysis.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         )
-                        if answer and buffer:
-                            st.markdown(f"**Question: {query}**")
-                            st.markdown(f"**Answer:** {answer}")
-                            
-                            st.download_button(
-                                label="Download Analysis",
-                                data=buffer,
-                                file_name="hansard_analysis.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-                        else:
-                            st.error("Failed to generate analysis. Please try again.")
-                    except Exception as e:
-                        st.error(f"An error occurred during analysis: {str(e)}")
             else:
                 st.warning("Please upload PDF files and enter a query.")
 
