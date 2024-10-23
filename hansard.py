@@ -15,11 +15,7 @@ import yaml
 from yaml.loader import SafeLoader
 
 # Page config
-st.set_page_config(
-    page_title="Hansard Insight Analyzer",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Hansard Analyzer", layout="wide")
 
 # Initialize session state
 if 'authentication_status' not in st.session_state:
@@ -28,8 +24,6 @@ if 'name' not in st.session_state:
     st.session_state['name'] = None
 if 'username' not in st.session_state:
     st.session_state['username'] = None
-if 'logout' not in st.session_state:
-    st.session_state['logout'] = False
 
 # Load credentials and configuration
 try:
@@ -50,65 +44,53 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days
 )
 
-# Sidebar header
-st.sidebar.title("Hansard Analyzer")
-
-# Logout button in sidebar if user is authenticated
-if st.session_state.authentication_status:
-    with st.sidebar:
-        st.write(f"Logged in as: *{st.session_state.name}*")
-        if st.button("Logout", key="logout_button"):
-            st.session_state.authentication_status = None
-            st.session_state.name = None
-            st.session_state.username = None
-            st.session_state.logout = True
-            st.rerun()
-
-# Main authentication logic
+# Authentication handling
 if not st.session_state.authentication_status:
-    st.title("Welcome to Hansard Insight Analyzer")
-    st.markdown("Please login to continue.")
-    
-    # Login form
+    st.title("Hansard Analyzer")
     name, authentication_status, username = authenticator.login()
-    
     if authentication_status == False:
-        st.error('Invalid username or password')
+        st.error("Username/password is incorrect")
+    elif authentication_status == None:
+        st.warning("Please enter your username and password")
     
-    # Update session state
-    if authentication_status:
-        st.session_state.authentication_status = authentication_status
-        st.session_state.name = name
-        st.session_state.username = username
-        st.rerun()
+    st.session_state['authentication_status'] = authentication_status
+    st.session_state['name'] = name
+    st.session_state['username'] = username
 
-# Main application
 if st.session_state.authentication_status:
-    st.title("Hansard Insight Analyzer")
+    # Sidebar setup
+    st.sidebar.title("Hansard Analyzer")
+    st.sidebar.write(f"Logged in as: {st.session_state.name}")
     
-    # Sidebar settings
+    # Logout button
+    if st.sidebar.button("Logout"):
+        st.session_state['authentication_status'] = None
+        st.session_state['name'] = None
+        st.session_state['username'] = None
+        st.rerun()
+    
     st.sidebar.title("Analysis Settings")
     
     # Model selection
     model_name = st.sidebar.selectbox(
         "Select Model",
-        ["gpt-4o-mini", "gpt-4o"],
-        help="Choose the OpenAI model to use for analysis"
+        ["gpt-4o-mini", "gpt-4o"]
     )
     
     # File upload
     uploaded_files = st.sidebar.file_uploader(
         "Upload PDF files",
         type="pdf",
-        accept_multiple_files=True,
-        help="Upload one or more PDF files for analysis"
+        accept_multiple_files=True
     )
+    
+    # Main content
+    st.title("Hansard Insight Analyzer")
     
     # Query input
     query = st.text_input(
         "Enter your query",
-        value="What is the position of the Liberal Party on Carbon Pricing?",
-        help="Enter your question about the uploaded documents"
+        value="What is the position of the Liberal Party on Carbon Pricing?"
     )
 
     @st.cache_data(show_spinner=False)
@@ -125,9 +107,11 @@ if st.session_state.authentication_status:
                 openai_api_key=openai_api_key
             )
 
+            # Progress bars
             loading_progress = st.progress(0)
             processing_progress = st.progress(0)
 
+            # Process documents
             docs = []
             total_files = len(uploaded_files)
             for i, uploaded_file in enumerate(uploaded_files):
@@ -140,6 +124,7 @@ if st.session_state.authentication_status:
                 loading_progress.progress((i + 1) / total_files)
                 os.remove(tmp_file_path)
 
+            # Split documents
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=1500,
                 chunk_overlap=300
@@ -147,10 +132,12 @@ if st.session_state.authentication_status:
             documents = text_splitter.split_documents(docs)
             processing_progress.progress(33)
 
+            # Create vector store
             vectorstore = FAISS.from_documents(documents, embeddings)
             retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             processing_progress.progress(66)
 
+            # Create prompt
             template = """You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
             Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
             
@@ -161,6 +148,7 @@ if st.session_state.authentication_status:
 
             prompt = ChatPromptTemplate.from_template(template)
 
+            # Create chain
             chain = (
                 RunnableParallel(
                     {"context": retriever, "question": RunnablePassthrough()}
@@ -172,11 +160,13 @@ if st.session_state.authentication_status:
 
             processing_progress.progress(100)
             
+            # Generate response
             response = chain.invoke(query)
 
+            # Create document
             buffer = BytesIO()
             doc = DocxDocument()
-            doc.add_paragraph(f"### Question: {query}\n\n**Answer:**\n")
+            doc.add_paragraph(f"Question: {query}\n\nAnswer:\n")
             doc.add_paragraph(response)
             doc.save(buffer)
             buffer.seek(0)
@@ -188,27 +178,22 @@ if st.session_state.authentication_status:
             return None, None
 
     # Analysis button
-    if st.button("Analyze Documents", key="analyze_button"):
-        if uploaded_files and openai_api_key and query:
-            with st.spinner('Processing documents...'):
+    if st.button("Analyze Documents"):
+        if uploaded_files and query:
+            with st.spinner("Processing documents..."):
                 answer, buffer = process_documents(openai_api_key, model_name, uploaded_files, query)
                 if answer and buffer:
                     st.success("Analysis complete!")
-                    st.markdown(f"### Analysis Results\n\n**Question:** {query}\n\n**Answer:** {answer}\n")
+                    st.markdown(f"Question: {query}\n\nAnswer: {answer}")
                     st.session_state['buffer'] = buffer
         else:
-            st.warning("Please upload PDF files and enter a query to analyze.")
+            st.warning("Please upload PDF files and enter a query.")
 
     # Download button
     if 'buffer' in st.session_state:
         st.download_button(
-            label="Download Analysis (DOCX)",
+            label="Download Analysis",
             data=st.session_state['buffer'],
             file_name="hansard_analysis.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-
-# Clear session state on logout
-if st.session_state.logout:
-    st.session_state.clear()
-    st.rerun()
