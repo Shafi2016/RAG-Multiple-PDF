@@ -17,34 +17,31 @@ from yaml.loader import SafeLoader
 # Page config
 st.set_page_config(page_title="Hansard Analyzer", layout="wide")
 
-# Initialize session state variables
-if 'authentication_status' not in st.session_state:
-    st.session_state['authentication_status'] = None
-if 'name' not in st.session_state:
-    st.session_state['name'] = None
-if 'username' not in st.session_state:
-    st.session_state['username'] = None
+def init_session_state():
+    """Initialize session state variables"""
+    if 'authentication_status' not in st.session_state:
+        st.session_state['authentication_status'] = None
+    if 'name' not in st.session_state:
+        st.session_state['name'] = None
+    if 'username' not in st.session_state:
+        st.session_state['username'] = None
+    if 'logout_clicked' not in st.session_state:
+        st.session_state['logout_clicked'] = False
 
-# Load credentials and configuration
-try:
-    credentials = yaml.safe_load(st.secrets["general"]["credentials"])
-    cookie_name = st.secrets["general"]["cookie_name"]
-    cookie_key = st.secrets["general"]["cookie_key"]
-    cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
-    openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
-except Exception as e:
-    st.error("Error loading credentials. Please check your secrets configuration.")
-    st.stop()
+def load_config():
+    """Load configuration from secrets"""
+    try:
+        return {
+            'credentials': yaml.safe_load(st.secrets["general"]["credentials"]),
+            'cookie_name': st.secrets["general"]["cookie_name"],
+            'cookie_key': st.secrets["general"]["cookie_key"],
+            'cookie_expiry_days': st.secrets["general"]["cookie_expiry_days"],
+            'openai_api_key': st.secrets["general"]["OPENAI_API_KEY"]
+        }
+    except Exception as e:
+        st.error(f"Error loading configuration: {str(e)}")
+        st.stop()
 
-# Create the authenticator object
-authenticator = stauth.Authenticate(
-    credentials,
-    cookie_name,
-    cookie_key,
-    cookie_expiry_days
-)
-
-# Cache for document processing
 @st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
     try:
@@ -89,7 +86,6 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
         processing_progress.progress(66)
 
-        # Create prompt
         template = """You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
         Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
         
@@ -100,7 +96,6 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
 
         prompt = ChatPromptTemplate.from_template(template)
 
-        # Create chain
         chain = (
             RunnableParallel(
                 {"context": retriever, "question": RunnablePassthrough()}
@@ -112,10 +107,8 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
 
         processing_progress.progress(100)
         
-        # Generate response
         response = chain.invoke(query)
 
-        # Create document
         buffer = BytesIO()
         doc = DocxDocument()
         doc.add_paragraph(f"Question: {query}\n\nAnswer:\n")
@@ -129,40 +122,59 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         st.error(f"Error processing documents: {str(e)}")
         return None, None
 
+def handle_logout():
+    """Handle logout functionality"""
+    try:
+        st.session_state['logout_clicked'] = True
+        st.session_state['authentication_status'] = None
+        st.session_state['name'] = None
+        st.session_state['username'] = None
+        # Clear any other session state variables
+        for key in list(st.session_state.keys()):
+            if key not in ['logout_clicked', 'authentication_status', 'name', 'username']:
+                del st.session_state[key]
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error during logout: {str(e)}")
+
 def main():
+    init_session_state()
+    config = load_config()
+    
+    # Create authenticator
+    authenticator = stauth.Authenticate(
+        config['credentials'],
+        config['cookie_name'],
+        config['cookie_key'],
+        config['cookie_expiry_days']
+    )
+
     st.title("Hansard Analyzer")
 
     # Handle Authentication
-    if st.session_state['authentication_status'] is not True:
-        # Create login form
-        name, authentication_status, username = authenticator.login()
-        
-        # Update session state
+    if not st.session_state['authentication_status']:
+        name, authentication_status, username = authenticator.login("Login", "main")
         st.session_state['name'] = name
         st.session_state['authentication_status'] = authentication_status
         st.session_state['username'] = username
         
         if authentication_status is False:
             st.error("Username/password is incorrect")
+            st.stop()
         elif authentication_status is None:
             st.warning("Please enter your username and password")
-            
-        # Stop execution if not authenticated
-        if authentication_status is not True:
             st.stop()
     
-    # Main application (only runs if authenticated)
+    # Main application
     if st.session_state['authentication_status']:
-        # Add logout button to sidebar
-        if authenticator.logout('Logout', 'sidebar'):
-            # Clear all session state
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-        
         # Sidebar setup
         st.sidebar.title("Hansard Analyzer")
         st.sidebar.write(f"Logged in as: {st.session_state['name']}")
+        
+        # Custom logout button in sidebar
+        if st.sidebar.button("Logout"):
+            handle_logout()
+            st.rerun()
         
         st.sidebar.title("Analysis Settings")
         
@@ -192,7 +204,12 @@ def main():
         if st.button("Analyze Documents"):
             if uploaded_files and query:
                 with st.spinner("Processing documents..."):
-                    answer, buffer = process_documents(openai_api_key, model_name, uploaded_files, query)
+                    answer, buffer = process_documents(
+                        config['openai_api_key'],
+                        model_name,
+                        uploaded_files,
+                        query
+                    )
                     if answer and buffer:
                         st.success("Analysis complete!")
                         st.markdown(f"Question: {query}\n\nAnswer: {answer}")
