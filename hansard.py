@@ -47,22 +47,17 @@ def load_config():
 
 def display_analysis_results():
     """Display analysis results in a formatted way"""
-    if st.session_state['analysis_result'] and st.session_state['current_query']:
-        st.markdown("### Analysis Results")
-        
-        # Create expander for query details
-        with st.expander("Query Details", expanded=True):
-            st.markdown(f"**Query:**\n{st.session_state['current_query']}")
-        
-        # Display the analysis
-        st.markdown("### Answer")
-        st.markdown(st.session_state['analysis_result'])
+    st.markdown("### Analysis Results")
+    with st.expander("Query Details", expanded=True):
+        st.markdown(f"**Query:**\n{st.session_state['current_query']}")
+    st.markdown("### Answer")
+    st.markdown(st.session_state['analysis_result'])
 
 @st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
     """Process documents and generate analysis"""
     try:
-        # Initialize progress bars
+        # Initialize progress indicators
         progress_text = st.empty()
         progress_text.text("Loading documents...")
         loading_progress = st.progress(0)
@@ -76,6 +71,7 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         llm = ChatOpenAI(
             temperature=0,
             model_name=model_name,
+            max_tokens=4000,
             openai_api_key=openai_api_key
         )
 
@@ -85,24 +81,17 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         
         for i, uploaded_file in enumerate(uploaded_files):
             progress_text.text(f"Processing file {i+1} of {total_files}...")
-            
-            # Create temporary file
             with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
                 tmp_file.write(uploaded_file.read())
                 tmp_file_path = tmp_file.name
 
-            # Load PDF
             loader = PyPDFLoader(file_path=tmp_file_path)
             docs.extend(loader.load())
             
-            # Clean up temporary file
             os.remove(tmp_file_path)
-            
-            # Update progress
             loading_progress.progress((i + 1) / total_files)
 
         progress_text.text("Splitting documents...")
-        # Split documents
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1500,
             chunk_overlap=300
@@ -110,8 +99,7 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         splits = text_splitter.split_documents(docs)
         processing_progress.progress(0.4)
 
-        # progress_text.text("Creating vector store...")
-        # Create vector store
+        progress_text.text("Creating vector store...")
         vectorstore = FAISS.from_documents(splits, embeddings)
         retriever = vectorstore.as_retriever(
             search_kwargs={"k": 5}
@@ -119,19 +107,16 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         processing_progress.progress(0.6)
 
         progress_text.text("Analyzing content...")
-        # Create prompt template
         prompt = ChatPromptTemplate.from_template("""
             You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
             Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
             {context}
             Question: {input}
-                   """)
+        """)
 
-
-        # Create chain
         chain = (
             RunnableParallel(
-                {"context": retriever, "question": RunnablePassthrough()}
+                {"context": retriever, "input": RunnablePassthrough()}
             )
             | prompt
             | llm
@@ -140,11 +125,9 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         
         processing_progress.progress(0.8)
 
-        # Generate response
         response = chain.invoke(query)
         processing_progress.progress(1.0)
 
-        # Create document
         buffer = BytesIO()
         doc = DocxDocument()
         doc.add_paragraph(f"Question: {query}\n\nAnswer:\n")
@@ -174,7 +157,7 @@ def main():
         config['cookie_expiry_days']
     )
 
-    # Check if logout was clicked in the previous run
+    # Check if logout was clicked
     if st.session_state['logout']:
         st.session_state['logout'] = False
         st.session_state['authentication_status'] = None
@@ -192,7 +175,6 @@ def main():
 
     # Handle Authentication
     if not st.session_state['authentication_status']:
-        # Login form
         authentication_status, name, username = authenticator.login()
         
         st.session_state['authentication_status'] = authentication_status
@@ -213,40 +195,36 @@ def main():
             st.title("Hansard Analyzer")
             st.write(f"Logged in as: {st.session_state['name']}")
             
-            # Simple logout button
             if st.button('Logout', key='logout_button'):
                 st.session_state['logout'] = True
                 st.rerun()
             
             st.title("Analysis Settings")
             
-            # Model selection
+            # Updated model selection
             model_name = st.selectbox(
                 "Select Model",
-                ["gpt-4o", "gpt-4o-mini"]
+                ["gpt-4o-mini", "gpt-4o"]
             )
             
-            # File upload
             uploaded_files = st.file_uploader(
                 "Upload PDF files",
                 type="pdf",
                 accept_multiple_files=True
             )
         
-        # Main content area using columns
+        # Main content area
         st.title("Hansard Insight Analyzer")
         
-        # Create columns for input and results
+        # Create columns for layout
         col1, col2 = st.columns([1, 2])
         
         with col1:
-            # Query input
             query = st.text_input(
                 "Enter your query",
                 value="What is the position of the Liberal Party on Carbon Pricing?"
             )
 
-            # Analysis button
             if st.button("Analyze Documents", type="primary"):
                 if uploaded_files and query:
                     with st.spinner("Analyzing documents..."):
@@ -264,7 +242,6 @@ def main():
                 else:
                     st.warning("Please upload PDF files and enter a query.")
             
-            # Download button
             if 'buffer' in st.session_state and st.session_state['buffer'] is not None:
                 st.download_button(
                     label="Download Analysis",
@@ -273,7 +250,7 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
 
-        # Display results in the second column
+        # Display results in second column
         with col2:
             if st.session_state['analysis_result']:
                 display_analysis_results()
