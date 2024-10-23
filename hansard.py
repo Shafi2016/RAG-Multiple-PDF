@@ -125,15 +125,13 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
 def handle_logout():
     """Handle logout functionality"""
     try:
-        st.session_state['logout_clicked'] = True
         st.session_state['authentication_status'] = None
         st.session_state['name'] = None
         st.session_state['username'] = None
         # Clear any other session state variables
         for key in list(st.session_state.keys()):
-            if key not in ['logout_clicked', 'authentication_status', 'name', 'username']:
+            if key not in ['authentication_status', 'name', 'username']:
                 del st.session_state[key]
-        st.rerun()
     except Exception as e:
         st.error(f"Error during logout: {str(e)}")
 
@@ -153,16 +151,21 @@ def main():
 
     # Handle Authentication
     if not st.session_state['authentication_status']:
-        name, authentication_status, username = authenticator.login("Login", "main")
-        st.session_state['name'] = name
-        st.session_state['authentication_status'] = authentication_status
-        st.session_state['username'] = username
-        
-        if authentication_status is False:
-            st.error("Username/password is incorrect")
-            st.stop()
-        elif authentication_status is None:
-            st.warning("Please enter your username and password")
+        try:
+            # Updated login method call without form_name parameter
+            authentication_status, name, username = authenticator.login()
+            st.session_state['authentication_status'] = authentication_status
+            st.session_state['name'] = name
+            st.session_state['username'] = username
+            
+            if authentication_status is False:
+                st.error("Username/password is incorrect")
+                st.stop()
+            elif authentication_status is None:
+                st.warning("Please enter your username and password")
+                st.stop()
+        except Exception as e:
+            st.error(f"Authentication error: {str(e)}")
             st.stop()
     
     # Main application
@@ -171,7 +174,7 @@ def main():
         st.sidebar.title("Hansard Analyzer")
         st.sidebar.write(f"Logged in as: {st.session_state['name']}")
         
-        # Custom logout button in sidebar
+        # Logout button
         if st.sidebar.button("Logout"):
             handle_logout()
             st.rerun()
