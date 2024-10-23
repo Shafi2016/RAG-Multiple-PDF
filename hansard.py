@@ -110,7 +110,7 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         splits = text_splitter.split_documents(docs)
         processing_progress.progress(0.4)
 
-        progress_text.text("Creating vector store...")
+        # progress_text.text("Creating vector store...")
         # Create vector store
         vectorstore = FAISS.from_documents(splits, embeddings)
         retriever = vectorstore.as_retriever(
@@ -121,18 +121,12 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         progress_text.text("Analyzing content...")
         # Create prompt template
         prompt = ChatPromptTemplate.from_template("""
-        You are an expert analyst of parliamentary debates. Analyze the provided Hansard context and answer the question.
-        Focus on being clear, specific, and well-structured in your response.
-        
-        Follow this format:
-        1. Main Points (bullet points)
-        2. Key Details (if any)
-        3. Clear Conclusion
-        
-        Context: {context}
-        Question: {question}
-        
-        Answer:""")
+            You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
+            Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
+            {context}
+            Question: {input}
+                   """)
+
 
         # Create chain
         chain = (
