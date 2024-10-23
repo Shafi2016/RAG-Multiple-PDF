@@ -14,7 +14,10 @@ from io import BytesIO
 import yaml
 from yaml.loader import SafeLoader
 
-# Initialize session state for authentication
+# Page config
+st.set_page_config(page_title="Hansard Insight Analyzer", layout="wide")
+
+# Initialize session states
 if 'authentication_status' not in st.session_state:
     st.session_state['authentication_status'] = None
 if 'name' not in st.session_state:
@@ -27,7 +30,6 @@ credentials = yaml.safe_load(st.secrets["general"]["credentials"])
 cookie_name = st.secrets["general"]["cookie_name"]
 cookie_key = st.secrets["general"]["cookie_key"]
 cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
-
 openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
 
 # Create the authenticator object
@@ -38,29 +40,49 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days
 )
 
-# Place logout button in sidebar if user is logged in
-if st.session_state['authentication_status']:
-    authenticator.logout("Logout", "sidebar")
-    st.sidebar.title("Session Settings")
+# Sidebar layout
+with st.sidebar:
+    if st.session_state.authentication_status:
+        st.title("Session Settings")
+        col1, col2 = st.columns([1,1])
+        with col2:
+            if authenticator.logout('Logout', 'sidebar'):
+                st.session_state['authentication_status'] = None
+                st.session_state['name'] = None
+                st.session_state['username'] = None
+                st.rerun()
 
-# Display login form if not logged in
-if not st.session_state['authentication_status']:
-    try:
-        name, authentication_status, username = authenticator.login()
-        st.session_state['authentication_status'] = authentication_status
-        st.session_state['name'] = name
-        st.session_state['username'] = username
-    except Exception as e:
-        st.error(f"Authentication Error: {str(e)}")
+# Main content
+if not st.session_state.authentication_status:
+    # Show login form
+    st.title("Hansard Insight Analyzer - Login")
+    name, authentication_status, username = authenticator.login()
+    
+    if authentication_status == False:
+        st.error('Username/password is incorrect')
+    elif authentication_status == None:
+        st.warning('Please enter your username and password')
+    
+    # Update session state
+    st.session_state['authentication_status'] = authentication_status
+    st.session_state['name'] = name
+    st.session_state['username'] = username
+    
+    if authentication_status:
+        st.rerun()
 
-if st.session_state['authentication_status']:
+elif st.session_state.authentication_status:
+    # Show main application
     st.write(f'Welcome *{st.session_state["name"]}*')
-    
     st.title("Hansard Insight Analyzer")
-    st.sidebar.title("Session Settings")
     
+    # Model selection
     model_name = st.sidebar.selectbox("Select Model", ["gpt-4o-mini", "gpt-4o"])
+    
+    # File upload
     uploaded_files = st.sidebar.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
+    
+    # Query input
     query = st.text_input("Enter your query", value="What is the position of the Liberal Party on Carbon Pricing?")
 
     @st.cache_data(show_spinner=False)
@@ -75,77 +97,4 @@ if st.session_state['authentication_status']:
             docs = []
             total_files = len(uploaded_files)
             for i, uploaded_file in enumerate(uploaded_files):
-                with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-                    tmp_file.write(uploaded_file.read())
-                    tmp_file_path = tmp_file.name
-
-                pdf_loader = PyPDFLoader(file_path=tmp_file_path)
-                docs += pdf_loader.load()
-                loading_progress.progress((i + 1) / total_files)
-                os.remove(tmp_file_path)
-
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
-            documents = text_splitter.split_documents(docs)
-            processing_progress.progress(33)
-
-            vectorstore = FAISS.from_documents(documents, embeddings)
-            retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
-            processing_progress.progress(66)
-
-            template = """You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
-            Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
-            
-            Context: {context}
-            Question: {question}
-            
-            Answer:"""
-
-            prompt = ChatPromptTemplate.from_template(template)
-
-            chain = (
-                RunnableParallel(
-                    {"context": retriever, "question": RunnablePassthrough()}
-                )
-                | prompt
-                | llm
-                | StrOutputParser()
-            )
-
-            processing_progress.progress(100)
-            
-            response = chain.invoke(query)
-
-            buffer = BytesIO()
-            doc = DocxDocument()
-            doc.add_paragraph(f"### Question: {query}\n\n**Answer:**\n")
-            doc.add_paragraph(response)
-            doc.save(buffer)
-            buffer.seek(0)
-
-            return response, buffer
-        except Exception as e:
-            st.error(f"Error processing documents: {str(e)}")
-            return None, None
-
-    if st.button("Apply"):
-        if uploaded_files and openai_api_key and query:
-            st.sidebar.success("Files uploaded successfully!")
-            answer, buffer = process_documents(openai_api_key, model_name, uploaded_files, query)
-            if answer and buffer:
-                st.markdown(f"### Question: {query}\n\n**Answer:** {answer}\n")
-                st.session_state['buffer'] = buffer
-        else:
-            st.sidebar.warning("Please upload PDFs and enter your query.")
-
-    if 'buffer' in st.session_state:
-        st.download_button(
-            label="Download .docx",
-            data=st.session_state['buffer'],
-            file_name="response.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
-
-elif st.session_state['authentication_status'] == False:
-    st.error('Username/password is incorrect')
-else:
-    st.warning('Please enter your username and password')
+                with
