@@ -17,7 +17,7 @@ from yaml.loader import SafeLoader
 # Page config
 st.set_page_config(page_title="Hansard Analyzer", layout="wide")
 
-# Initialize session state at the very beginning
+# Initialize session state
 if 'authentication_status' not in st.session_state:
     st.session_state['authentication_status'] = None
 if 'name' not in st.session_state:
@@ -44,14 +44,6 @@ def load_config():
     except Exception as e:
         st.error(f"Error loading configuration: {str(e)}")
         st.stop()
-
-def display_analysis_results():
-    """Display analysis results in a formatted way"""
-    st.markdown("### Analysis Results")
-    with st.expander("Query Details", expanded=True):
-        st.markdown(f"**Query:**\n{st.session_state['current_query']}")
-    st.markdown("### Answer")
-    st.markdown(st.session_state['analysis_result'])
 
 @st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
@@ -170,9 +162,6 @@ def main():
                 del st.session_state[key]
         st.rerun()
 
-    # Show title
-    st.title("Hansard Analyzer")
-
     # Handle Authentication
     if not st.session_state['authentication_status']:
         authentication_status, name, username = authenticator.login()
@@ -190,18 +179,16 @@ def main():
 
     # Main application
     if st.session_state['authentication_status']:
-        # Sidebar
+        # Sidebar for settings and logout
         with st.sidebar:
-            st.title("Hansard Analyzer")
-            st.write(f"Logged in as: {st.session_state['name']}")
+            st.write(f"Welcome *{st.session_state['name']}*")
             
             if st.button('Logout', key='logout_button'):
                 st.session_state['logout'] = True
                 st.rerun()
             
-            st.title("Analysis Settings")
+            st.markdown("### Settings")
             
-            # Updated model selection
             model_name = st.selectbox(
                 "Select Model",
                 ["gpt-4o-mini", "gpt-4o"]
@@ -214,46 +201,42 @@ def main():
             )
         
         # Main content area
-        st.title("Hansard Insight Analyzer")
+        st.markdown("## Hansard Insight Analyzer")
         
-        # Create columns for layout
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            query = st.text_input(
-                "Enter your query",
-                value="What is the position of the Liberal Party on Carbon Pricing?"
-            )
+        query = st.text_input(
+            "Enter your query",
+            value="What is the position of the Liberal Party on Carbon Pricing?"
+        )
 
-            if st.button("Analyze Documents", type="primary"):
-                if uploaded_files and query:
-                    with st.spinner("Analyzing documents..."):
-                        answer, buffer = process_documents(
-                            config['openai_api_key'],
-                            model_name,
-                            uploaded_files,
-                            query
-                        )
-                        if answer and buffer:
-                            st.session_state['analysis_result'] = answer
-                            st.session_state['current_query'] = query
-                            st.session_state['buffer'] = buffer
-                            st.success("Analysis complete!")
-                else:
-                    st.warning("Please upload PDF files and enter a query.")
+        if st.button("Apply", type="primary"):
+            if uploaded_files and query:
+                with st.spinner("Analyzing documents..."):
+                    answer, buffer = process_documents(
+                        config['openai_api_key'],
+                        model_name,
+                        uploaded_files,
+                        query
+                    )
+                    if answer and buffer:
+                        st.session_state['analysis_result'] = answer
+                        st.session_state['current_query'] = query
+                        st.session_state['buffer'] = buffer
+                        st.success("Analysis complete!")
+            else:
+                st.warning("Please upload PDF files and enter a query.")
+        
+        # Display results
+        if st.session_state.get('analysis_result'):
+            st.markdown(f"**Question: {st.session_state['current_query']}**")
+            st.markdown(f"**Answer:** {st.session_state['analysis_result']}")
             
-            if 'buffer' in st.session_state and st.session_state['buffer'] is not None:
-                st.download_button(
-                    label="Download Analysis",
-                    data=st.session_state['buffer'],
-                    file_name="hansard_analysis.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-
-        # Display results in second column
-        with col2:
-            if st.session_state['analysis_result']:
-                display_analysis_results()
+            # Download button
+            st.download_button(
+                label="Download Analysis",
+                data=st.session_state['buffer'],
+                file_name="hansard_analysis.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
 
 if __name__ == "__main__":
     main()
