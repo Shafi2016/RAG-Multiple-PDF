@@ -14,6 +14,16 @@ from io import BytesIO
 import yaml
 from yaml.loader import SafeLoader
 
+# Initialize session state for authentication
+if 'authentication_status' not in st.session_state:
+    st.session_state['authentication_status'] = None
+if 'name' not in st.session_state:
+    st.session_state['name'] = None
+if 'username' not in st.session_state:
+    st.session_state['username'] = None
+if 'logout' not in st.session_state:
+    st.session_state['logout'] = False
+
 # Load credentials and configuration from Streamlit Secrets
 credentials = yaml.safe_load(st.secrets["general"]["credentials"])
 cookie_name = st.secrets["general"]["cookie_name"]
@@ -22,7 +32,7 @@ cookie_expiry_days = st.secrets["general"]["cookie_expiry_days"]
 
 openai_api_key = st.secrets["general"]["OPENAI_API_KEY"]
 
-# Create an authenticator object
+# Create the authenticator object
 authenticator = stauth.Authenticate(
     credentials,
     cookie_name,
@@ -31,12 +41,22 @@ authenticator = stauth.Authenticate(
     None
 )
 
-# Display the login form
-name, authentication_status, username = authenticator.login('main')
+# Place logout button in sidebar if user is logged in
+if st.session_state['authentication_status']:
+    col1, col2 = st.sidebar.columns([1, 1])
+    with col2:
+        authenticator.logout('Logout', 'sidebar')
 
-if authentication_status:
-    authenticator.logout('Logout', 'main')
-    st.write(f'Welcome *{name}*')
+# Display login form if not logged in
+if not st.session_state['authentication_status']:
+    st.title("Hansard Insight Analyzer - Login")
+    name, authentication_status, username = authenticator.login('Login', 'main')
+    st.session_state['authentication_status'] = authentication_status
+    st.session_state['name'] = name
+    st.session_state['username'] = username
+
+if st.session_state['authentication_status']:
+    st.write(f'Welcome *{st.session_state["name"]}*')
     
     st.title("Hansard Insight Analyzer")
     st.sidebar.title("Session Settings")
@@ -74,7 +94,6 @@ if authentication_status:
             retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             processing_progress.progress(66)
 
-            # Create the chain using new LangChain patterns
             template = """You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
             Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
             
@@ -128,7 +147,7 @@ if authentication_status:
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
-elif authentication_status == False:
+elif st.session_state['authentication_status'] == False:
     st.error('Username/password is incorrect')
 else:
     st.warning('Please enter your username and password')
