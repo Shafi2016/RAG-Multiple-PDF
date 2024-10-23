@@ -26,6 +26,10 @@ if 'username' not in st.session_state:
     st.session_state['username'] = None
 if 'logout' not in st.session_state:
     st.session_state['logout'] = False
+if 'analysis_result' not in st.session_state:
+    st.session_state['analysis_result'] = None
+if 'current_query' not in st.session_state:
+    st.session_state['current_query'] = None
 
 def load_config():
     """Load configuration from secrets"""
@@ -41,11 +45,26 @@ def load_config():
         st.error(f"Error loading configuration: {str(e)}")
         st.stop()
 
+def display_analysis_results():
+    """Display analysis results in a formatted way"""
+    if st.session_state['analysis_result'] and st.session_state['current_query']:
+        st.markdown("### Analysis Results")
+        
+        # Create expander for query details
+        with st.expander("Query Details", expanded=True):
+            st.markdown(f"**Query:**\n{st.session_state['current_query']}")
+        
+        # Display the analysis
+        st.markdown("### Answer")
+        st.markdown(st.session_state['analysis_result'])
+
 @st.cache_data(show_spinner=False)
 def process_documents(openai_api_key, model_name, uploaded_files, query):
     """Process documents and generate analysis"""
     try:
         # Initialize progress bars
+        progress_text = st.empty()
+        progress_text.text("Loading documents...")
         loading_progress = st.progress(0)
         processing_progress = st.progress(0)
 
@@ -65,6 +84,8 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         total_files = len(uploaded_files)
         
         for i, uploaded_file in enumerate(uploaded_files):
+            progress_text.text(f"Processing file {i+1} of {total_files}...")
+            
             # Create temporary file
             with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
                 tmp_file.write(uploaded_file.read())
@@ -80,6 +101,7 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
             # Update progress
             loading_progress.progress((i + 1) / total_files)
 
+        progress_text.text("Splitting documents...")
         # Split documents
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1500,
@@ -88,6 +110,7 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         splits = text_splitter.split_documents(docs)
         processing_progress.progress(0.4)
 
+        progress_text.text("Creating vector store...")
         # Create vector store
         vectorstore = FAISS.from_documents(splits, embeddings)
         retriever = vectorstore.as_retriever(
@@ -95,10 +118,16 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         )
         processing_progress.progress(0.6)
 
+        progress_text.text("Analyzing content...")
         # Create prompt template
         prompt = ChatPromptTemplate.from_template("""
-        You are provided with a context extracted from Canadian parliamentary debates (Hansard) concerning various political issues.
-        Answer the question by focusing on the relevant party based on the question. Provide the five to six main points and conclusion.
+        You are an expert analyst of parliamentary debates. Analyze the provided Hansard context and answer the question.
+        Focus on being clear, specific, and well-structured in your response.
+        
+        Follow this format:
+        1. Main Points (bullet points)
+        2. Key Details (if any)
+        3. Clear Conclusion
         
         Context: {context}
         Question: {question}
@@ -129,7 +158,8 @@ def process_documents(openai_api_key, model_name, uploaded_files, query):
         doc.save(buffer)
         buffer.seek(0)
 
-        # Clear progress bars
+        # Clear progress indicators
+        progress_text.empty()
         loading_progress.empty()
         processing_progress.empty()
 
@@ -156,6 +186,8 @@ def main():
         st.session_state['authentication_status'] = None
         st.session_state['name'] = None
         st.session_state['username'] = None
+        st.session_state['analysis_result'] = None
+        st.session_state['current_query'] = None
         for key in list(st.session_state.keys()):
             if key not in ['authentication_status', 'name', 'username', 'logout']:
                 del st.session_state[key]
@@ -183,63 +215,74 @@ def main():
     # Main application
     if st.session_state['authentication_status']:
         # Sidebar
-        st.sidebar.title("Hansard Analyzer")
-        st.sidebar.write(f"Logged in as: {st.session_state['name']}")
+        with st.sidebar:
+            st.title("Hansard Analyzer")
+            st.write(f"Logged in as: {st.session_state['name']}")
+            
+            # Simple logout button
+            if st.button('Logout', key='logout_button'):
+                st.session_state['logout'] = True
+                st.rerun()
+            
+            st.title("Analysis Settings")
+            
+            # Model selection
+            model_name = st.selectbox(
+                "Select Model",
+                ["gpt-4o", "gpt-4o-mini"]
+            )
+            
+            # File upload
+            uploaded_files = st.file_uploader(
+                "Upload PDF files",
+                type="pdf",
+                accept_multiple_files=True
+            )
         
-        # Simple logout button
-        if st.sidebar.button('Logout', key='logout_button'):
-            st.session_state['logout'] = True
-            st.rerun()
-        
-        st.sidebar.title("Analysis Settings")
-        
-        # Model selection
-        model_name = st.sidebar.selectbox(
-            "Select Model",
-            ["gpt-3.5-turbo", "gpt-4"]  # Updated model names to match OpenAI's offerings
-        )
-        
-        # File upload
-        uploaded_files = st.sidebar.file_uploader(
-            "Upload PDF files",
-            type="pdf",
-            accept_multiple_files=True
-        )
-        
-        # Main content
+        # Main content area using columns
         st.title("Hansard Insight Analyzer")
         
-        # Query input
-        query = st.text_input(
-            "Enter your query",
-            value="What is the position of the Liberal Party on Carbon Pricing?"
-        )
-
-        # Analysis button
-        if st.button("Analyze Documents"):
-            if uploaded_files and query:
-                with st.spinner("Processing documents..."):
-                    answer, buffer = process_documents(
-                        config['openai_api_key'],
-                        model_name,
-                        uploaded_files,
-                        query
-                    )
-                    if answer and buffer:
-                        st.success("Analysis complete!")
-                        st.markdown(f"Question: {query}\n\nAnswer: {answer}")
-                        st.session_state['buffer'] = buffer
-            else:
-                st.warning("Please upload PDF files and enter a query.")
-
-        # Download button
-        if 'buffer' in st.session_state and st.session_state['buffer'] is not None:
-            st.download_button(
-                label="Download Analysis",
-                data=st.session_state['buffer'],
-                file_name="hansard_analysis.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        # Create columns for input and results
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            # Query input
+            query = st.text_input(
+                "Enter your query",
+                value="What is the position of the Liberal Party on Carbon Pricing?"
             )
+
+            # Analysis button
+            if st.button("Analyze Documents", type="primary"):
+                if uploaded_files and query:
+                    with st.spinner("Analyzing documents..."):
+                        answer, buffer = process_documents(
+                            config['openai_api_key'],
+                            model_name,
+                            uploaded_files,
+                            query
+                        )
+                        if answer and buffer:
+                            st.session_state['analysis_result'] = answer
+                            st.session_state['current_query'] = query
+                            st.session_state['buffer'] = buffer
+                            st.success("Analysis complete!")
+                else:
+                    st.warning("Please upload PDF files and enter a query.")
+            
+            # Download button
+            if 'buffer' in st.session_state and st.session_state['buffer'] is not None:
+                st.download_button(
+                    label="Download Analysis",
+                    data=st.session_state['buffer'],
+                    file_name="hansard_analysis.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+
+        # Display results in the second column
+        with col2:
+            if st.session_state['analysis_result']:
+                display_analysis_results()
 
 if __name__ == "__main__":
     main()
